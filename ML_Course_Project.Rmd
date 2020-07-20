@@ -1,0 +1,116 @@
+---
+title: "Prediction_Assignment_Writeup"
+author: "Andres Caso"
+date: "15-07-2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache=TRUE, warning=FALSE, message=FALSE)
+library(ggplot2);library(caret);library(dplyr);library(randomForest);library(tibble);
+library(ggpubr)
+```
+
+## Introduction
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.
+
+The objective is use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways
+
+
+## Load and prepare the DATA
+
+```{r data, echo = FALSE}
+urltrain<- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+urltest<- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(urltrain,destfile = "training.csv")
+download.file(urltest,destfile = "validate.csv")
+data <- read.csv2("training.csv", sep = ",", header = TRUE)
+validate <- read.csv2("validate.csv", sep = ",", header = TRUE)
+navar <- which(colSums(is.na(validate))>0)
+data <- data %>% select(-all_of(c(1,3,4,5,7,navar)))
+validate <- validate %>% select(-all_of(c(1,3,4,5,7,navar)))
+zv <- which(nearZeroVar(data,saveMetrics=TRUE)[,4]== TRUE)
+data <- data %>% select(-zv)
+validate <- validate %>% select(-zv)
+data$classe <- as.factor(data$classe)
+data$user_name <- as.factor(data$user_name)
+validate$user_name <- as.factor(validate$user_name)
+character_vars <- lapply(data, class) == "character"
+data[, character_vars] <- lapply(data[, character_vars], as.numeric)
+character_vars <- lapply(validate, class) == "character"
+validate[, character_vars] <- lapply(validate[, character_vars], as.numeric)
+```
+
+1) Checking variables with NA, training set have 67 features with all the values equal to NA, and the validate set have 100 features with all the values equal to NA.
+2) Subsetting the data set, for simplicity will be deleted the 100 features of validate data set with all the values equal to NA from both data set, so both data set have a 59 features plus the outcome.
+3) Check features with zero variance or near, only new_window have almost zero variance, this feature don't contribute probably to the model, therefore is deleted.
+4) Change to factor the outcome variable classe and the user_name variable
+5) Change to numeric to some predictors.
+6) Delete time features because they not important.
+7) Create a Training and testing data set, split by 60% - 40%
+
+```{r split, echo = FALSE}
+set.seed(12)
+inTrain <- createDataPartition(y=data$classe, p=0.6, list=FALSE)
+training <- data[inTrain,]; testing <- data[-inTrain,]
+```
+
+## Exploratory analisys in the training data set
+
+1) Searching patterns in the predictors roll_belt and pitch_forearm, it's apreciate the difference of the outcome "classe" separetion
+
+```{r graf1, echo = FALSE}
+g <- ggplot(training, aes(x = roll_belt, y = pitch_forearm))
+g + geom_point(aes(colour=classe, alpha=0.8))
+```
+
+## Create Models, since it is a classification problem, will be searched the best model between: Random Forest, Decision Tree and K-mean.
+
+1) Random Forest
+```{r rf, echo = FALSE}
+set.seed(12)
+mod_rf <- randomForest(classe ~ . , data=training, mtry=29, importance=TRUE, ntree=500)
+pred_rf <- predict(mod_rf,testing)
+cm_rf<-confusionMatrix(pred_rf, testing$classe)
+cm_rf$overall[1]
+```
+
+After running the model, it can see the accuracy (>99%) of prediction of the model with mtry = 29 in the testing data set.
+
+Now look the importance of the predictors, to confirm the exploratory analisys, roll_belt, roll_forearm and pitch_forearm are very important predictors.
+
+```{r imp, echo = FALSE}
+importancia <- as.data.frame(mod_rf$importance)
+importancia <- rownames_to_column(importancia,var = "variable")
+g1 <- ggplot(data = importancia, aes(x = reorder(variable, MeanDecreaseAccuracy),y = MeanDecreaseAccuracy, fill = MeanDecreaseAccuracy)) + labs(x = "variable", title = "Accuracy Reduction") + geom_col() + coord_flip() + theme_bw() + theme(legend.position = "bottom")
+g2 <- ggplot(data = importancia, aes(x = reorder(variable, MeanDecreaseGini), y = MeanDecreaseGini, fill = MeanDecreaseGini)) + labs(x = "variable", title = "Purity Reduction (Gini)") + geom_col() + coord_flip() + theme_bw() + theme(legend.position = "bottom")
+ggarrange(g1, g2)
+```
+
+2) CART (Decision tree)
+```{r dt, echo = FALSE}
+set.seed(12)
+mod_dt <- train(classe ~ .,method="rpart",data=training)
+pred_dt <- predict(mod_dt,testing)
+cm_dt <- confusionMatrix(pred_dt, testing$classe)
+cm_dt$overall[1]
+```
+
+After running the model, it can see the accuracy (>47%) of prediction of the model in the testing data set.
+
+3) K-mean
+```{r km, echo = FALSE}
+set.seed(12)
+mod_kn <- train(classe ~ ., data = training, method = "knn", metric = "Accuracy")
+pred_kn <- predict(mod_kn,testing)
+cm_kn <- confusionMatrix(pred_kn, testing$classe)
+cm_kn$overall[1]
+```
+
+After running the model, it can see the accuracy (>89%) of prediction of the K means model in the testing data set.
+
+## Conclusion
+
+The Random Forest model it's for lnger the most accuracy model, and predict almost all the case right, > 99% of accuracy.
+
